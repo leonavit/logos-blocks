@@ -66,6 +66,21 @@
     <main class="mx-auto max-w-6xl px-5 py-5 sm:px-8">
       <div id="grid" class="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-5"></div>
       <p id="empty" class="hidden py-24 text-center text-sm leading-7 text-slate-500">טוען לוגואים…</p>
+      <section id="archive" class="mt-10 hidden">
+        <button
+          id="archive-toggle"
+          type="button"
+          class="flex w-full items-center justify-between rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-navy shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+          aria-expanded="false"
+          aria-controls="archive-panel"
+        >
+          <span id="archive-label">ארכיון</span>
+          <span id="archive-count" class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500"></span>
+        </button>
+        <div id="archive-panel" class="hidden pt-4">
+          <div id="archive-grid" class="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-5"></div>
+        </div>
+      </section>
     </main>
 
     <div
@@ -85,7 +100,7 @@
       <button
         id="prev"
         type="button"
-        class="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-full bg-white/10 px-3 py-4 text-xl text-white hover:bg-white/20 sm:block"
+        class="absolute right-3 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full bg-white/15 text-2xl text-white hover:bg-white/25"
         aria-label="הקודם"
       >
         ‹
@@ -93,7 +108,7 @@
       <button
         id="next"
         type="button"
-        class="absolute left-3 top-1/2 hidden -translate-y-1/2 rounded-full bg-white/10 px-3 py-4 text-xl text-white hover:bg-white/20 sm:block"
+        class="absolute left-3 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full bg-white/15 text-2xl text-white hover:bg-white/25"
         aria-label="הבא"
       >
         ›
@@ -117,12 +132,20 @@
 
       const grid = document.getElementById("grid");
       const empty = document.getElementById("empty");
+      const archive = document.getElementById("archive");
+      const archiveToggle = document.getElementById("archive-toggle");
+      const archiveLabel = document.getElementById("archive-label");
+      const archiveCount = document.getElementById("archive-count");
+      const archivePanel = document.getElementById("archive-panel");
+      const archiveGrid = document.getElementById("archive-grid");
       const lightbox = document.getElementById("lightbox");
       const lightboxImage = document.getElementById("lightbox-image");
       const lightboxTitle = document.getElementById("lightbox-title");
 
       let visible = [];
+      let lightboxItems = [];
       let openIndex = -1;
+      let archiveOpen = false;
       let drag = null;
       let suppressClick = false;
       let loadError = "";
@@ -293,42 +316,44 @@
         return encodeURIComponent(FOLDER) + "/" + encodeURIComponent(file);
       }
 
+      function cardHtml(logo, index, action) {
+        const ext = extension(logo.file).toUpperCase();
+        const label = escapeHtml(logo.label);
+        const actionLabel = action === "hide" ? "הסתר" : "החזר";
+        return `
+          <div data-index="${index}" class="group relative">
+            <button type="button" data-open draggable="false" class="flex w-full cursor-grab flex-col overflow-hidden rounded-2xl bg-white text-right shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-navy/20 active:cursor-grabbing">
+              <span class="logo-stage flex h-36 items-center justify-center p-4 sm:h-48 sm:p-6">
+                <img src="${srcFor(logo.file)}" alt="${label}" draggable="false" class="pointer-events-none max-h-full max-w-full object-contain transition duration-300 group-hover:scale-[1.03]" />
+              </span>
+              <span class="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-3 sm:px-4">
+                <span class="truncate text-xs font-semibold text-navy sm:text-sm">${label}</span>
+                <span class="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">${ext}</span>
+              </span>
+            </button>
+            <button type="button" data-${action} class="hide-btn absolute start-3 top-3 z-10 rounded-full bg-navy px-3 py-1.5 text-xs font-semibold text-white shadow-md transition hover:bg-ink focus:outline-none focus:ring-4 focus:ring-navy/30">${actionLabel}</button>
+          </div>`;
+      }
+
       function render() {
-        visible = logos.slice();
-        const showEmpty = visible.length === 0;
-        empty.classList.toggle("hidden", !showEmpty);
-        if (showEmpty) {
-          empty.textContent = !loadedOnce
-            ? "טוען לוגואים…"
-            : loadError || "אין לוגואים בתיקייה.";
+        visible = logos.filter((logo) => !hidden.has(logo.file));
+        const archived = logos.filter((logo) => hidden.has(logo.file));
+        const showEmpty = loadedOnce && logos.length === 0;
+        empty.classList.toggle("hidden", !showEmpty && (loadedOnce || logos.length > 0));
+        if (!loadedOnce && logos.length === 0) {
+          empty.classList.remove("hidden");
+          empty.textContent = "טוען לוגואים…";
+        } else if (showEmpty) {
+          empty.classList.remove("hidden");
+          empty.textContent = loadError || "אין לוגואים בתיקייה.";
         }
-        grid.innerHTML = visible
-          .map((logo, index) => {
-            const ext = extension(logo.file).toUpperCase();
-            const label = escapeHtml(logo.label);
-            if (hidden.has(logo.file)) {
-              return `
-                <div data-index="${index}" class="flex items-center justify-center">
-                  <button type="button" data-show class="grid h-11 w-11 place-items-center rounded-full bg-white text-navy shadow-[0_0_0_6px_rgba(2,53,106,0.14),0_8px_20px_rgba(7,17,31,0.12)] ring-1 ring-slate-200 transition hover:scale-105 focus:outline-none focus:ring-4 focus:ring-navy/20" aria-label="הצג ${label}" title="הצג">
-                    <span class="h-2.5 w-2.5 rounded-full bg-navy"></span>
-                  </button>
-                </div>`;
-            }
-            return `
-              <div data-index="${index}" class="group relative">
-                <button type="button" data-open draggable="false" class="flex w-full cursor-grab flex-col overflow-hidden rounded-2xl bg-white text-right shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-navy/20 active:cursor-grabbing">
-                  <span class="logo-stage flex h-36 items-center justify-center p-4 sm:h-48 sm:p-6">
-                    <img src="${srcFor(logo.file)}" alt="${label}" draggable="false" class="pointer-events-none max-h-full max-w-full object-contain transition duration-300 group-hover:scale-[1.03]" />
-                  </span>
-                  <span class="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-3 sm:px-4">
-                    <span class="truncate text-xs font-semibold text-navy sm:text-sm">${label}</span>
-                    <span class="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">${ext}</span>
-                  </span>
-                </button>
-                <button type="button" data-hide class="hide-btn absolute start-3 top-3 z-10 rounded-full bg-navy px-3 py-1.5 text-xs font-semibold text-white shadow-md transition hover:bg-ink focus:outline-none focus:ring-4 focus:ring-navy/30">הסתר</button>
-              </div>`;
-          })
-          .join("");
+        grid.innerHTML = visible.map((logo, index) => cardHtml(logo, index, "hide")).join("");
+        archive.classList.toggle("hidden", archived.length === 0);
+        archiveCount.textContent = String(archived.length);
+        archiveLabel.textContent = archiveOpen ? "הסתר ארכיון" : "הצג ארכיון";
+        archiveToggle.setAttribute("aria-expanded", String(archiveOpen));
+        archivePanel.classList.toggle("hidden", !archiveOpen);
+        archiveGrid.innerHTML = archived.map((logo, index) => cardHtml(logo, index, "restore")).join("");
       }
 
       function setHidden(file, isHidden) {
@@ -402,9 +427,10 @@
         saveOrder();
       }
 
-      function openAt(index) {
-        const logo = visible[index];
-        if (!logo || hidden.has(logo.file)) return;
+      function openAt(list, index) {
+        const logo = list[index];
+        if (!logo) return;
+        lightboxItems = list;
         openIndex = index;
         lightboxImage.src = srcFor(logo.file);
         lightboxImage.alt = logo.label;
@@ -422,22 +448,21 @@
       }
 
       function step(delta) {
-        if (openIndex < 0 || visible.length === 0) return;
-        for (let i = 0; i < visible.length; i += 1) {
-          const next = (openIndex + delta * (i + 1) + visible.length * 2) % visible.length;
-          if (!hidden.has(visible[next].file)) {
-            openAt(next);
-            return;
-          }
-        }
+        if (openIndex < 0 || lightboxItems.length === 0) return;
+        openAt(lightboxItems, (openIndex + delta + lightboxItems.length) % lightboxItems.length);
       }
 
-      grid.addEventListener("click", (event) => {
+      function listFor(card) {
+        return archiveGrid.contains(card) ? logos.filter((logo) => hidden.has(logo.file)) : visible;
+      }
+
+      function onCardsClick(event) {
         const hideButton = event.target.closest("[data-hide]");
-        const showButton = event.target.closest("[data-show]");
-        if (hideButton || showButton) {
-          const card = (hideButton || showButton).closest("[data-index]");
-          const logo = card && visible[Number(card.dataset.index)];
+        const restoreButton = event.target.closest("[data-restore]");
+        if (hideButton || restoreButton) {
+          const card = (hideButton || restoreButton).closest("[data-index]");
+          const list = card ? listFor(card) : [];
+          const logo = card && list[Number(card.dataset.index)];
           if (logo) setHidden(logo.file, Boolean(hideButton));
           return;
         }
@@ -449,15 +474,22 @@
         if (!opener) return;
         const card = opener.closest("[data-index]");
         if (!card) return;
-        openAt(Number(card.dataset.index));
+        openAt(listFor(card), Number(card.dataset.index));
+      }
+
+      grid.addEventListener("click", onCardsClick);
+      archiveGrid.addEventListener("click", onCardsClick);
+
+      archiveToggle.addEventListener("click", () => {
+        archiveOpen = !archiveOpen;
+        render();
       });
 
       grid.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
-        if (event.target.closest("[data-hide], [data-show]")) return;
+        if (event.target.closest("[data-hide], [data-restore]")) return;
         const card = event.target.closest("[data-index]");
-        if (!card || card.querySelector("[data-show]")) return;
-        card.setPointerCapture(event.pointerId);
+        if (!card) return;
         drag = {
           pointerId: event.pointerId,
           index: Number(card.dataset.index),
@@ -474,13 +506,14 @@
         const dy = event.clientY - drag.startY;
         if (!drag.active) {
           if (dx * dx + dy * dy < 36) return;
+          drag.card.setPointerCapture(event.pointerId);
           startDrag(event);
         }
         event.preventDefault();
         drag.ghost.style.left = event.clientX - drag.offsetX + "px";
         drag.ghost.style.top = event.clientY - drag.offsetY + "px";
         const hit = document.elementFromPoint(event.clientX, event.clientY);
-        const over = hit && hit.closest("[data-index]");
+        const over = hit && hit.closest("#grid [data-index]");
         if (!over || over === drag.card) return;
         const to = Number(over.dataset.index);
         if (!passedCenter(drag.card, over, event.clientX, event.clientY)) return;
