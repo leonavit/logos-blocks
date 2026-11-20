@@ -156,7 +156,7 @@
       }
 
       function persistOrder(names) {
-        fetch("/api/order", {
+        fetch("api/order", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(names),
@@ -179,7 +179,7 @@
         } catch (error) {
           // The server file keeps the hidden logos if local storage is blocked.
         }
-        fetch("/api/hidden", {
+        fetch("api/hidden", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(names),
@@ -188,7 +188,7 @@
 
       async function listLogoFiles() {
         try {
-          const response = await fetch("/api/logos", { cache: "no-store" });
+          const response = await fetch("api/logos", { cache: "no-store" });
           if (response.ok) {
             const data = await response.json();
             if (Array.isArray(data)) {
@@ -203,7 +203,38 @@
             }
           }
         } catch (error) {
-          // Opening the file directly cannot list the folder. The directory listing below covers a plain static server.
+          // A static host has no API. logos.json below covers GitHub Pages.
+        }
+
+        try {
+          const response = await fetch("logos.json", { cache: "no-store" });
+          if (response.ok) {
+            const files = await response.json();
+            let order = null;
+            let savedHidden = null;
+            try {
+              const saved = await fetch("order.json", { cache: "no-store" });
+              if (saved.ok) {
+                const data = await saved.json();
+                if (Array.isArray(data)) order = data;
+                else if (data && typeof data === "object") {
+                  order = Array.isArray(data.order) ? data.order : null;
+                  savedHidden = Array.isArray(data.hidden) ? data.hidden : null;
+                }
+              }
+            } catch (error) {
+              // The gallery can still show the files in their default order.
+            }
+            if (Array.isArray(files)) {
+              return {
+                files: files.filter((name) => IMAGE_EXT.test(name)),
+                order,
+                hidden: savedHidden,
+              };
+            }
+          }
+        } catch (error) {
+          // Fall through to a directory listing when a local static server provides one.
         }
 
         const response = await fetch(encodeURIComponent(FOLDER) + "/", { cache: "no-store" });
