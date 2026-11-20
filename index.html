@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>לוגואים · אשמורת מרקט</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Heebo", "Arial", "sans-serif"],
+            },
+            colors: {
+              ink: "#07111f",
+              navy: "#02356a",
+              brand: "#e10e13",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      .logo-stage {
+        background-color: #f7f8fb;
+        background-image: linear-gradient(45deg, #eceff4 25%, transparent 25%),
+          linear-gradient(-45deg, #eceff4 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #eceff4 75%),
+          linear-gradient(-45deg, transparent 75%, #eceff4 75%);
+        background-size: 22px 22px;
+        background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+      }
+      .is-dragging {
+        opacity: 0.35;
+      }
+      .drag-ghost {
+        position: fixed;
+        z-index: 40;
+        margin: 0;
+        pointer-events: none;
+        transform: scale(1.03);
+        box-shadow: 0 18px 40px rgba(7, 17, 31, 0.22);
+      }
+      .hide-btn {
+        opacity: 1;
+      }
+      @media (hover: hover) {
+        .hide-btn {
+          opacity: 0;
+        }
+        .group:hover .hide-btn,
+        .hide-btn:focus-visible {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-[#eef1f6] font-sans text-ink antialiased">
+    <main class="mx-auto max-w-6xl px-5 py-5 sm:px-8">
+      <div id="grid" class="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-5"></div>
+      <p id="empty" class="hidden py-24 text-center text-sm leading-7 text-slate-500">טוען לוגואים…</p>
+    </main>
+
+    <div
+      id="lightbox"
+      class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lightbox-title"
+    >
+      <button
+        id="close"
+        type="button"
+        class="absolute left-4 top-4 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20"
+      >
+        סגירה
+      </button>
+      <button
+        id="prev"
+        type="button"
+        class="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-full bg-white/10 px-3 py-4 text-xl text-white hover:bg-white/20 sm:block"
+        aria-label="הקודם"
+      >
+        ‹
+      </button>
+      <button
+        id="next"
+        type="button"
+        class="absolute left-3 top-1/2 hidden -translate-y-1/2 rounded-full bg-white/10 px-3 py-4 text-xl text-white hover:bg-white/20 sm:block"
+        aria-label="הבא"
+      >
+        ›
+      </button>
+      <figure class="flex max-h-[90vh] w-full max-w-4xl flex-col items-center gap-4">
+        <div class="logo-stage flex h-[58vh] w-full items-center justify-center rounded-2xl p-8">
+          <img id="lightbox-image" alt="" class="max-h-full max-w-full object-contain" />
+        </div>
+        <figcaption id="lightbox-title" class="text-center text-sm font-medium text-white"></figcaption>
+      </figure>
+    </div>
+
+    <script>
+      const FOLDER = "market logos";
+      const IMAGE_EXT = /\.(png|jpe?g|webp|svg|gif|avif)$/i;
+      const ORDER_KEY = "ashmoret-logo-order";
+      const HIDDEN_KEY = "ashmoret-logo-hidden";
+
+      let logos = [];
+      let defaultOrder = [];
+
+      const grid = document.getElementById("grid");
+      const empty = document.getElementById("empty");
+      const lightbox = document.getElementById("lightbox");
+      const lightboxImage = document.getElementById("lightbox-image");
+      const lightboxTitle = document.getElementById("lightbox-title");
+
+      let visible = [];
+      let openIndex = -1;
+      let drag = null;
+      let suppressClick = false;
+      let loadError = "";
+      let loadedOnce = false;
+      let orderReady = false;
+      let hiddenReady = false;
+      let orderToken = 0;
+      let hidden = new Set();
+
+      function labelFor(file) {
+        return file.replace(/\.[^.]+$/, "").trim() || file.trim();
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[char]);
+      }
+
+      function readLocalOrder() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(ORDER_KEY) || "null");
+          return Array.isArray(saved) ? saved : null;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function persistOrder(names) {
+        fetch("/api/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(names),
+        }).catch(() => {});
+      }
+
+      function readLocalHidden() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "null");
+          return Array.isArray(saved) ? saved : null;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function persistHidden() {
+        const names = [...hidden];
+        try {
+          localStorage.setItem(HIDDEN_KEY, JSON.stringify(names));
+        } catch (error) {
+          // The server file keeps the hidden logos if local storage is blocked.
+        }
+        fetch("/api/hidden", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(names),
+        }).catch(() => {});
+      }
+
+      async function listLogoFiles() {
+        try {
+          const response = await fetch("/api/logos", { cache: "no-store" });
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+              return { files: data.filter((name) => IMAGE_EXT.test(name)), order: null };
+            }
+            if (data && Array.isArray(data.files)) {
+              return {
+                files: data.files.filter((name) => IMAGE_EXT.test(name)),
+                order: Array.isArray(data.order) ? data.order : null,
+                hidden: Array.isArray(data.hidden) ? data.hidden : null,
+              };
+            }
+          }
+        } catch (error) {
+          // Opening the file directly cannot list the folder. The directory listing below covers a plain static server.
+        }
+
+        const response = await fetch(encodeURIComponent(FOLDER) + "/", { cache: "no-store" });
+        if (!response.ok) throw new Error("listing failed");
+        const html = await response.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const names = [];
+        doc.querySelectorAll("a[href]").forEach((link) => {
+          const href = link.getAttribute("href");
+          if (!href || href.startsWith("?") || href.startsWith("/") || href.includes("..")) return;
+          let name = "";
+          try {
+            name = decodeURIComponent(href.split("?")[0]);
+          } catch (error) {
+            return;
+          }
+          if (!name || name.endsWith("/")) return;
+          if (IMAGE_EXT.test(name)) names.push(name);
+        });
+        return { files: [...new Set(names)].sort((a, b) => a.localeCompare(b, "he")), order: null, hidden: null };
+      }
+
+      function arrange(files, preferred) {
+        const incoming = new Set(files);
+        const byFile = new Map(logos.map((logo) => [logo.file, logo]));
+        const ordered = [];
+        const used = new Set();
+        (preferred || []).forEach((file) => {
+          if (!incoming.has(file) || used.has(file)) return;
+          ordered.push(byFile.get(file) || { file, label: labelFor(file) });
+          used.add(file);
+        });
+        files.forEach((file) => {
+          if (used.has(file)) return;
+          ordered.push(byFile.get(file) || { file, label: labelFor(file) });
+        });
+        return ordered;
+      }
+
+      function saveOrder() {
+        const names = logos.map((logo) => logo.file);
+        orderToken += 1;
+        try {
+          localStorage.setItem(ORDER_KEY, JSON.stringify(names));
+        } catch (error) {
+          // Private mode can block storage. The server file is the copy that survives reloads.
+        }
+        persistOrder(names);
+      }
+
+      function extension(file) {
+        return file.split(".").pop().toLowerCase();
+      }
+
+      function srcFor(file) {
+        return encodeURIComponent(FOLDER) + "/" + encodeURIComponent(file);
+      }
+
+      function render() {
+        visible = logos.slice();
+        const showEmpty = visible.length === 0;
+        empty.classList.toggle("hidden", !showEmpty);
+        if (showEmpty) {
+          empty.textContent = !loadedOnce
+            ? "טוען לוגואים…"
+            : loadError || "אין לוגואים בתיקייה.";
+        }
+        grid.innerHTML = visible
+          .map((logo, index) => {
+            const ext = extension(logo.file).toUpperCase();
+            const label = escapeHtml(logo.label);
+            if (hidden.has(logo.file)) {
+              return `
+                <div data-index="${index}" class="flex items-center justify-center">
+                  <button type="button" data-show class="grid h-11 w-11 place-items-center rounded-full bg-white text-navy shadow-[0_0_0_6px_rgba(2,53,106,0.14),0_8px_20px_rgba(7,17,31,0.12)] ring-1 ring-slate-200 transition hover:scale-105 focus:outline-none focus:ring-4 focus:ring-navy/20" aria-label="הצג ${label}" title="הצג">
+                    <span class="h-2.5 w-2.5 rounded-full bg-navy"></span>
+                  </button>
+                </div>`;
+            }
+            return `
+              <div data-index="${index}" class="group relative">
+                <button type="button" data-open draggable="false" class="flex w-full cursor-grab flex-col overflow-hidden rounded-2xl bg-white text-right shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-navy/20 active:cursor-grabbing">
+                  <span class="logo-stage flex h-36 items-center justify-center p-4 sm:h-48 sm:p-6">
+                    <img src="${srcFor(logo.file)}" alt="${label}" draggable="false" class="pointer-events-none max-h-full max-w-full object-contain transition duration-300 group-hover:scale-[1.03]" />
+                  </span>
+                  <span class="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-3 sm:px-4">
+                    <span class="truncate text-xs font-semibold text-navy sm:text-sm">${label}</span>
+                    <span class="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">${ext}</span>
+                  </span>
+                </button>
+                <button type="button" data-hide class="hide-btn absolute start-3 top-3 z-10 rounded-full bg-navy px-3 py-1.5 text-xs font-semibold text-white shadow-md transition hover:bg-ink focus:outline-none focus:ring-4 focus:ring-navy/30">הסתר</button>
+              </div>`;
+          })
+          .join("");
+      }
+
+      function setHidden(file, isHidden) {
+        if (isHidden) hidden.add(file);
+        else hidden.delete(file);
+        persistHidden();
+        render();
+      }
+
+      function moveCard(from, to) {
+        if (from === to) return;
+        const next = visible.slice();
+        const [item] = next.splice(from, 1);
+        next.splice(to, 0, item);
+        const slotIndexes = [];
+        logos.forEach((logo, index) => {
+          if (visible.includes(logo)) slotIndexes.push(index);
+        });
+        next.forEach((logo, index) => {
+          logos[slotIndexes[index]] = logo;
+        });
+        visible = next;
+
+        const node = grid.children[from];
+        const target = grid.children[to];
+        if (from < to) target.after(node);
+        else target.before(node);
+        [...grid.children].forEach((card, index) => {
+          card.dataset.index = String(index);
+        });
+        if (drag) drag.index = to;
+      }
+
+      function passedCenter(card, over, x, y) {
+        const fromRect = card.getBoundingClientRect();
+        const rect = over.getBoundingClientRect();
+        const dx = rect.left + rect.width / 2 - (fromRect.left + fromRect.width / 2);
+        const dy = rect.top + rect.height / 2 - (fromRect.top + fromRect.height / 2);
+        if (Math.abs(dy) > Math.abs(dx)) return dy > 0 ? y > rect.top + rect.height / 2 : y < rect.top + rect.height / 2;
+        return dx > 0 ? x > rect.left + rect.width / 2 : x < rect.left + rect.width / 2;
+      }
+
+      function startDrag(event) {
+        const card = drag.card;
+        const rect = card.getBoundingClientRect();
+        const ghost = card.cloneNode(true);
+        ghost.classList.add("drag-ghost");
+        ghost.removeAttribute("data-index");
+        ghost.style.width = rect.width + "px";
+        ghost.style.height = rect.height + "px";
+        ghost.style.left = rect.left + "px";
+        ghost.style.top = rect.top + "px";
+        document.body.appendChild(ghost);
+        card.classList.add("is-dragging");
+        card.style.pointerEvents = "none";
+        drag.ghost = ghost;
+        drag.offsetX = event.clientX - rect.left;
+        drag.offsetY = event.clientY - rect.top;
+        drag.active = true;
+        suppressClick = true;
+        document.body.classList.add("select-none");
+      }
+
+      function endDrag() {
+        if (!drag) return;
+        drag.card.classList.remove("is-dragging");
+        drag.card.style.pointerEvents = "";
+        drag.ghost.remove();
+        document.body.classList.remove("select-none");
+        drag = null;
+        saveOrder();
+      }
+
+      function openAt(index) {
+        const logo = visible[index];
+        if (!logo || hidden.has(logo.file)) return;
+        openIndex = index;
+        lightboxImage.src = srcFor(logo.file);
+        lightboxImage.alt = logo.label;
+        lightboxTitle.textContent = logo.label + " · " + logo.file.trim();
+        lightbox.classList.remove("hidden");
+        lightbox.classList.add("flex");
+        document.body.classList.add("overflow-hidden");
+      }
+
+      function closeLightbox() {
+        lightbox.classList.add("hidden");
+        lightbox.classList.remove("flex");
+        document.body.classList.remove("overflow-hidden");
+        openIndex = -1;
+      }
+
+      function step(delta) {
+        if (openIndex < 0 || visible.length === 0) return;
+        for (let i = 0; i < visible.length; i += 1) {
+          const next = (openIndex + delta * (i + 1) + visible.length * 2) % visible.length;
+          if (!hidden.has(visible[next].file)) {
+            openAt(next);
+            return;
+          }
+        }
+      }
+
+      grid.addEventListener("click", (event) => {
+        const hideButton = event.target.closest("[data-hide]");
+        const showButton = event.target.closest("[data-show]");
+        if (hideButton || showButton) {
+          const card = (hideButton || showButton).closest("[data-index]");
+          const logo = card && visible[Number(card.dataset.index)];
+          if (logo) setHidden(logo.file, Boolean(hideButton));
+          return;
+        }
+        if (suppressClick) {
+          suppressClick = false;
+          return;
+        }
+        const opener = event.target.closest("[data-open]");
+        if (!opener) return;
+        const card = opener.closest("[data-index]");
+        if (!card) return;
+        openAt(Number(card.dataset.index));
+      });
+
+      grid.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        if (event.target.closest("[data-hide], [data-show]")) return;
+        const card = event.target.closest("[data-index]");
+        if (!card || card.querySelector("[data-show]")) return;
+        card.setPointerCapture(event.pointerId);
+        drag = {
+          pointerId: event.pointerId,
+          index: Number(card.dataset.index),
+          card,
+          startX: event.clientX,
+          startY: event.clientY,
+          active: false,
+        };
+      });
+
+      window.addEventListener("pointermove", (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        if (!drag.active) {
+          if (dx * dx + dy * dy < 36) return;
+          startDrag(event);
+        }
+        event.preventDefault();
+        drag.ghost.style.left = event.clientX - drag.offsetX + "px";
+        drag.ghost.style.top = event.clientY - drag.offsetY + "px";
+        const hit = document.elementFromPoint(event.clientX, event.clientY);
+        const over = hit && hit.closest("[data-index]");
+        if (!over || over === drag.card) return;
+        const to = Number(over.dataset.index);
+        if (!passedCenter(drag.card, over, event.clientX, event.clientY)) return;
+        moveCard(drag.index, to);
+      }, { passive: false });
+
+      function finishPointer(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const moved = drag.active;
+        if (moved) endDrag();
+        else drag = null;
+        if (!moved) suppressClick = false;
+      }
+
+      window.addEventListener("pointerup", finishPointer);
+      window.addEventListener("pointercancel", finishPointer);
+
+      document.getElementById("close").addEventListener("click", closeLightbox);
+      document.getElementById("prev").addEventListener("click", () => step(-1));
+      document.getElementById("next").addEventListener("click", () => step(1));
+
+      lightbox.addEventListener("click", (event) => {
+        if (event.target === lightbox) closeLightbox();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (lightbox.classList.contains("hidden")) return;
+        if (event.key === "Escape") closeLightbox();
+        if (event.key === "ArrowLeft") step(1);
+        if (event.key === "ArrowRight") step(-1);
+      });
+
+      async function syncLogos() {
+        if (drag || openIndex >= 0) return;
+        const token = orderToken;
+        try {
+          const state = await listLogoFiles();
+          if (token !== orderToken || drag || openIndex >= 0) return;
+          defaultOrder = state.files.slice();
+          let preferred = logos.map((logo) => logo.file);
+          if (!orderReady) {
+            const serverOrder = state.order && state.order.length ? state.order : null;
+            const localOrder = readLocalOrder();
+            preferred = serverOrder || localOrder || state.files;
+            if (!serverOrder && localOrder && localOrder.length) persistOrder(localOrder);
+          }
+          logos = arrange(state.files, preferred);
+          if (!hiddenReady) {
+            const known = new Set(logos.map((logo) => logo.file));
+            const serverHidden = Array.isArray(state.hidden) ? state.hidden.filter((file) => known.has(file)) : null;
+            const localHidden = (readLocalHidden() || []).filter((file) => known.has(file));
+            hidden = new Set(serverHidden || localHidden);
+            if (!serverHidden && localHidden.length) persistHidden();
+            hiddenReady = true;
+          } else {
+            hidden = new Set([...hidden].filter((file) => logos.some((logo) => logo.file === file)));
+          }
+          orderReady = true;
+          loadError = "";
+          loadedOnce = true;
+          const current = logos.map((logo) => logo.file).join("\n");
+          if (current !== preferred.join("\n") || !document.querySelector("#grid [data-index]")) {
+            render();
+          }
+        } catch (error) {
+          loadedOnce = true;
+          if (logos.length === 0) {
+            loadError = "כדי שהלוגואים ייטענו מהתיקייה, פתחו את «פתח גלריה.command».";
+            render();
+          }
+        }
+      }
+
+      render();
+      syncLogos();
+      setInterval(syncLogos, 2000);
+    </script>
+  </body>
+</html>
